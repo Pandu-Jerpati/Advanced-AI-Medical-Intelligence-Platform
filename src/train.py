@@ -1,153 +1,156 @@
-import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torchvision import datasets, transforms, models
 from torch.utils.data import DataLoader
+import os
+
+# ==========================================
+# 1. DEVICE
+# ==========================================
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+print("Using device:", device)
 
 
 # ==========================================
-# 1. Configuration
+# 2. DATASET PATHS
 # ==========================================
 
-TRAIN_DIR = "data/processed/train"
-VAL_DIR = "data/processed/val"
-MODEL_DIR = "models"
-
-BATCH_SIZE = 16
-NUM_EPOCHS = 5
-LEARNING_RATE = 0.001
-
-NUM_CLASSES = 5
-
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-print("Using device:", DEVICE)
+TRAIN_DIR = r"D:\AI-Medical-Data\data\processed\train"
+VAL_DIR = r"D:\AI-Medical-Data\data\processed\val"
 
 
 # ==========================================
-# 2. Image preprocessing
+# 3. IMAGE TRANSFORMS
 # ==========================================
 
-train_transforms = transforms.Compose([
+train_transform = transforms.Compose([
     transforms.Resize((224, 224)),
     transforms.RandomHorizontalFlip(),
     transforms.RandomRotation(10),
     transforms.ToTensor(),
     transforms.Normalize(
-        mean=[0.485, 0.456, 0.406],
-        std=[0.229, 0.224, 0.225]
+        [0.485, 0.456, 0.406],
+        [0.229, 0.224, 0.225]
     )
 ])
 
-
-val_transforms = transforms.Compose([
+val_transform = transforms.Compose([
     transforms.Resize((224, 224)),
     transforms.ToTensor(),
     transforms.Normalize(
-        mean=[0.485, 0.456, 0.406],
-        std=[0.229, 0.224, 0.225]
+        [0.485, 0.456, 0.406],
+        [0.229, 0.224, 0.225]
     )
 ])
 
 
 # ==========================================
-# 3. Load datasets
+# 4. LOAD DATASET
 # ==========================================
 
 train_dataset = datasets.ImageFolder(
     TRAIN_DIR,
-    transform=train_transforms
+    transform=train_transform
 )
 
 val_dataset = datasets.ImageFolder(
     VAL_DIR,
-    transform=val_transforms
+    transform=val_transform
 )
-
-print("\nClasses:")
-print(train_dataset.classes)
-
-print("\nTraining images:", len(train_dataset))
-print("Validation images:", len(val_dataset))
 
 
 # ==========================================
-# 4. Create DataLoaders
+# 5. DATA LOADERS
 # ==========================================
 
 train_loader = DataLoader(
     train_dataset,
-    batch_size=BATCH_SIZE,
+    batch_size=32,
     shuffle=True,
     num_workers=0
 )
 
 val_loader = DataLoader(
     val_dataset,
-    batch_size=BATCH_SIZE,
+    batch_size=32,
     shuffle=False,
     num_workers=0
 )
 
+print("Classes:", train_dataset.classes)
+print("Training images:", len(train_dataset))
+print("Validation images:", len(val_dataset))
+print("Training batches:", len(train_loader))
+print("Validation batches:", len(val_loader))
+
 
 # ==========================================
-# 5. Load pretrained ResNet18
+# 6. LOAD PRETRAINED DENSENET121
 # ==========================================
 
-print("\nLoading pretrained ResNet18...")
+print("\nLoading pretrained DenseNet121...")
 
-model = models.resnet18(
-    weights=models.ResNet18_Weights.DEFAULT
+model = models.densenet121(
+    weights=models.DenseNet121_Weights.DEFAULT
 )
 
 
 # ==========================================
-# 6. Replace final layer
+# 7. FREEZE PRETRAINED LAYERS
 # ==========================================
 
-num_features = model.fc.in_features
+for param in model.parameters():
+    param.requires_grad = False
 
-model.fc = nn.Linear(
-    num_features,
-    NUM_CLASSES
+
+# ==========================================
+# 8. CHANGE FINAL CLASSIFIER
+# ==========================================
+
+num_classes = len(train_dataset.classes)
+
+model.classifier = nn.Linear(
+    model.classifier.in_features,
+    num_classes
 )
 
-model = model.to(DEVICE)
+model = model.to(device)
 
-print("Model ready.")
-print("Number of classes:", NUM_CLASSES)
+print("DenseNet121 model ready.")
+print("Number of classes:", num_classes)
 
 
 # ==========================================
-# 7. Loss and optimizer
+# 9. LOSS FUNCTION
 # ==========================================
 
 criterion = nn.CrossEntropyLoss()
 
+
+# ==========================================
+# 10. OPTIMIZER
+# ==========================================
+
 optimizer = optim.Adam(
-    model.parameters(),
-    lr=LEARNING_RATE
+    model.classifier.parameters(),
+    lr=0.001
 )
 
 
 # ==========================================
-# 8. Training
+# 11. TRAINING
 # ==========================================
 
-best_val_accuracy = 0.0
+num_epochs = 1
 
-os.makedirs(MODEL_DIR, exist_ok=True)
-
-for epoch in range(NUM_EPOCHS):
+for epoch in range(num_epochs):
 
     print("\n" + "=" * 50)
-    print(f"Epoch {epoch + 1}/{NUM_EPOCHS}")
+    print(f"Epoch {epoch + 1}/{num_epochs}")
     print("=" * 50)
-
-    # -------------------------
-    # Training
-    # -------------------------
 
     model.train()
 
@@ -155,10 +158,14 @@ for epoch in range(NUM_EPOCHS):
     correct = 0
     total = 0
 
+    # ------------------------------------------
+    # Training batches
+    # ------------------------------------------
+
     for batch_idx, (images, labels) in enumerate(train_loader):
 
-        images = images.to(DEVICE)
-        labels = labels.to(DEVICE)
+        images = images.to(device)
+        labels = labels.to(device)
 
         optimizer.zero_grad()
 
@@ -175,37 +182,43 @@ for epoch in range(NUM_EPOCHS):
         _, predicted = torch.max(outputs, 1)
 
         total += labels.size(0)
+
         correct += (predicted == labels).sum().item()
 
+        # Show progress every 100 batches
         if (batch_idx + 1) % 100 == 0:
             print(
-                f"Batch {batch_idx + 1}/{len(train_loader)} "
-                f"Loss: {loss.item():.4f}"
+                f"Batch {batch_idx + 1}/{len(train_loader)}"
             )
 
+
+    # ==========================================
+    # TRAINING RESULTS
+    # ==========================================
+
     train_loss = running_loss / len(train_loader)
+
     train_accuracy = 100 * correct / total
 
-    print(f"\nTraining Loss: {train_loss:.4f}")
-    print(f"Training Accuracy: {train_accuracy:.2f}%")
 
+    # ==========================================
+    # 12. VALIDATION
+    # ==========================================
 
-    # -------------------------
-    # Validation
-    # -------------------------
+    print("\nStarting validation...")
 
     model.eval()
 
+    val_correct = 0
+    val_total = 0
     val_loss = 0.0
-    correct = 0
-    total = 0
 
     with torch.no_grad():
 
-        for images, labels in val_loader:
+        for batch_idx, (images, labels) in enumerate(val_loader):
 
-            images = images.to(DEVICE)
-            labels = labels.to(DEVICE)
+            images = images.to(device)
+            labels = labels.to(device)
 
             outputs = model(images)
 
@@ -215,41 +228,60 @@ for epoch in range(NUM_EPOCHS):
 
             _, predicted = torch.max(outputs, 1)
 
-            total += labels.size(0)
-            correct += (predicted == labels).sum().item()
+            val_total += labels.size(0)
+
+            val_correct += (predicted == labels).sum().item()
+
+            # Validation progress
+            if (batch_idx + 1) % 100 == 0:
+                print(
+                    f"Validation Batch "
+                    f"{batch_idx + 1}/{len(val_loader)}"
+                )
+
+
+    # ==========================================
+    # VALIDATION RESULTS
+    # ==========================================
 
     val_loss = val_loss / len(val_loader)
-    val_accuracy = 100 * correct / total
 
+    val_accuracy = 100 * val_correct / val_total
+
+
+    # ==========================================
+    # 13. PRINT RESULTS
+    # ==========================================
+
+    print("\n" + "=" * 50)
+    print("TRAINING RESULTS")
+    print("=" * 50)
+
+    print(f"Train Loss: {train_loss:.4f}")
+    print(f"Train Accuracy: {train_accuracy:.2f}%")
     print(f"Validation Loss: {val_loss:.4f}")
     print(f"Validation Accuracy: {val_accuracy:.2f}%")
 
 
-    # -------------------------
-    # Save best model
-    # -------------------------
+# ==========================================
+# 14. SAVE MODEL
+# ==========================================
 
-    if val_accuracy > best_val_accuracy:
+os.makedirs("models", exist_ok=True)
 
-        best_val_accuracy = val_accuracy
-
-        model_path = os.path.join(
-            MODEL_DIR,
-            "best_resnet18.pth"
-        )
-
-        torch.save(
-            model.state_dict(),
-            model_path
-        )
-
-        print("\nBest model saved!")
-        print("Path:", model_path)
+torch.save(
+    model.state_dict(),
+    "models/densenet121_medical.pth"
+)
 
 
-print("\n================================")
-print("TRAINING COMPLETED!")
-print("================================")
+# ==========================================
+# 15. COMPLETED
+# ==========================================
 
-print("Best Validation Accuracy:",
-      f"{best_val_accuracy:.2f}%")
+print("\n" + "=" * 50)
+print("TRAINING COMPLETED")
+print("=" * 50)
+
+print("Model saved:")
+print("models/densenet121_medical.pth")
